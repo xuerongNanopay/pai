@@ -1,14 +1,41 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+// struct Context {
+//     system_prompt: String,
+//     messages: Vec<Message>,
+//     tools: Option<Vec<Tool>>,
+// }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+// struct Tool {
+//     name: String,
+//     description: String,
+// }
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+// enum Provider {
+//     Openai,
+//     Deepseek,
+// }
+
+// enum StopReason {
+//     Stop,
+//     Length,
+//     ToolUse,
+//     Error,
+//     Aborted,
+// }
+
+// enum Message {
+//     User {
+//         content: String,
+//         timestamp: u64,
+//     },
+//     Ai {
+//         content: String,
+//         model: String,
+//         provider: String,
+//         response_id: Option<String>,
+//         error_message: Option<String>,
+//         stop_reason: String,
+//         timestamp: u64,
+//     },
+// }
+
+// pub async fn prompt()
