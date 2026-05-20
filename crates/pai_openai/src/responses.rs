@@ -65,11 +65,6 @@ impl ResponseCreateRequest {
             ..Self::default()
         }
     }
-
-    pub fn with_stream(mut self, stream: bool) -> Self {
-        self.stream = Some(stream);
-        self
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
