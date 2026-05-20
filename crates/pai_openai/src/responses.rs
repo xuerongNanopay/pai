@@ -562,6 +562,113 @@ mod tests {
     }
 
     #[test]
+    fn serializes_entire_create_request_json() {
+        let mut metadata = HashMap::new();
+        metadata.insert("trace_id".to_string(), "trace_123".to_string());
+
+        let request = ResponseCreateRequest {
+            model: Some("gpt-5".to_string()),
+            input: Some(ResponseInput::Items(vec![InputItem::Message(
+                InputMessage::user("Tell me a joke."),
+            )])),
+            instructions: Some("Answer in one sentence.".to_string()),
+            previous_response_id: Some("resp_previous".to_string()),
+            max_output_tokens: Some(100),
+            max_tool_calls: Some(2),
+            metadata: Some(metadata),
+            store: Some(true),
+            stream: Some(false),
+            temperature: Some(0.5),
+            top_p: Some(1.0),
+            parallel_tool_calls: Some(true),
+            truncation: Some(Truncation::Auto),
+            reasoning: Some(ReasoningConfig {
+                effort: Some(ReasoningEffort::Low),
+                summary: Some(ReasoningSummary::Auto),
+            }),
+            text: Some(TextConfig {
+                format: Some(TextFormat::JsonObject),
+                verbosity: Some(Verbosity::Low),
+            }),
+            tool_choice: Some(ToolChoice::Mode(ToolChoiceMode::Auto)),
+            tools: vec![Tool::Function {
+                name: "lookup_weather".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "city": {
+                            "type": "string"
+                        }
+                    },
+                    "required": ["city"],
+                    "additionalProperties": false
+                }),
+                description: Some("Look up the weather for a city.".to_string()),
+                strict: Some(true),
+            }],
+            include: Some(vec!["reasoning.encrypted_content".to_string()]),
+        };
+
+        let json = serde_json::to_value(request).expect("request should serialize");
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "model": "gpt-5",
+                "input": [
+                    {
+                        "role": "user",
+                        "content": "Tell me a joke."
+                    }
+                ],
+                "instructions": "Answer in one sentence.",
+                "previous_response_id": "resp_previous",
+                "max_output_tokens": 100,
+                "max_tool_calls": 2,
+                "metadata": {
+                    "trace_id": "trace_123"
+                },
+                "store": true,
+                "stream": false,
+                "temperature": 0.5,
+                "top_p": 1.0,
+                "parallel_tool_calls": true,
+                "truncation": "auto",
+                "reasoning": {
+                    "effort": "low",
+                    "summary": "auto"
+                },
+                "text": {
+                    "format": {
+                        "type": "json_object"
+                    },
+                    "verbosity": "low"
+                },
+                "tool_choice": "auto",
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "lookup_weather",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "city": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": ["city"],
+                            "additionalProperties": false
+                        },
+                        "description": "Look up the weather for a city.",
+                        "strict": true
+                    }
+                ],
+                "include": ["reasoning.encrypted_content"]
+            })
+        );
+    }
+
+    #[test]
     fn deserializes_response_and_extracts_output_text() {
         let json = serde_json::json!({
             "id": "resp_123",
@@ -595,6 +702,75 @@ mod tests {
         let response: Response = serde_json::from_value(json).expect("response should parse");
 
         assert_eq!(response.output_text(), "Hello world");
+    }
+
+    #[test]
+    fn serializes_entire_response_json() {
+        let response = Response {
+            id: "resp_123".to_string(),
+            object: "response".to_string(),
+            created_at: 1741476542,
+            status: ResponseStatus::Completed,
+            output: vec![ResponseOutputItem::Message {
+                id: "msg_123".to_string(),
+                status: "completed".to_string(),
+                role: MessageRole::Assistant,
+                content: vec![OutputContent::OutputText {
+                    text: "Hello world".to_string(),
+                    annotations: vec![],
+                    logprobs: vec![],
+                }],
+            }],
+            error: None,
+            incomplete_details: None,
+            instructions: None,
+            max_output_tokens: None,
+            model: Some("gpt-5".to_string()),
+            parallel_tool_calls: None,
+            previous_response_id: None,
+            reasoning: None,
+            store: None,
+            temperature: None,
+            text: None,
+            tool_choice: None,
+            tools: vec![],
+            top_p: None,
+            truncation: None,
+            usage: None,
+            metadata: HashMap::new(),
+            extra: HashMap::new(),
+        };
+
+        let json = serde_json::to_value(response).expect("response should serialize");
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "id": "resp_123",
+                "object": "response",
+                "created_at": 1741476542,
+                "status": "completed",
+                "model": "gpt-5",
+                "output": [
+                    {
+                        "type": "message",
+                        "id": "msg_123",
+                        "status": "completed",
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "Hello world",
+                                "annotations": [],
+                                "logprobs": []
+                            }
+                        ]
+                    }
+                ],
+                "tools": [],
+                "metadata": {}
+            })
+        );
     }
 
     #[test]
