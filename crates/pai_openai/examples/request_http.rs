@@ -1,11 +1,13 @@
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let body = reqwest::get("https://httpbin.org/get")
-        .await?
-        .text()
-        .await?;
+    let client = pai_openai::OpenAIClient::from_env()?;
+    let request = pai_openai::ResponseCreateRequest::text(
+        pai_openai::GPT_5_4_MINI,
+        "Tell me a three sentence bedtime story about a unicorn.",
+    );
 
-    println!("{}", body);
+    let response = client.create_response(&request).await?;
+    println!("{}", response.output_text());
 
     Ok(())
 }
