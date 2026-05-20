@@ -46,6 +46,24 @@ impl OpenAIClient {
         self.post_json("responses", request).await
     }
 
+    pub async fn stream_response(
+        &self,
+        request: &ResponseCreateRequest,
+    ) -> Result<ResponseStream, OpenAIError> {
+        let mut request = request.clone();
+        request.stream = Some(true);
+
+        let response = self
+            .http
+            .post(self.url("responses"))
+            .bearer_auth(&self.api_key)
+            .json(&request)
+            .send()
+            .await?;
+
+        Self::parse_stream_response(response).await
+    }
+
     pub async fn retrieve_response(&self, response_id: &str) -> Result<Response, OpenAIError> {
         self.get_json(&format!("responses/{response_id}")).await
     }
@@ -147,12 +165,150 @@ impl OpenAIClient {
         }
     }
 
+    async fn parse_stream_response(
+        response: reqwest::Response,
+    ) -> Result<ResponseStream, OpenAIError> {
+        let status = response.status();
+
+        if status.is_success() {
+            Ok(ResponseStream::new(response))
+        } else {
+            let body = response.text().await?;
+            Err(OpenAIError::Api { status, body })
+        }
+    }
+
     fn url(&self, path: &str) -> String {
         format!("{}/{}", self.base_url, path.trim_start_matches('/'))
     }
 }
 
 pub type Client = OpenAIClient;
+
+pub struct ResponseStream {
+    response: reqwest::Response,
+    buffer: String,
+    done: bool,
+}
+
+impl ResponseStream {
+    fn new(response: reqwest::Response) -> Self {
+        Self {
+            response,
+            buffer: String::new(),
+            done: false,
+        }
+    }
+
+    pub async fn next_event(&mut self) -> Result<Option<ResponseStreamEvent>, OpenAIError> {
+        loop {
+            if let Some(raw_event) = self.next_buffered_event() {
+                match parse_sse_event(&raw_event)? {
+                    ParsedSseEvent::Event(event) => return Ok(Some(event)),
+                    ParsedSseEvent::Done => {
+                        self.done = true;
+                        return Ok(None);
+                    }
+                    ParsedSseEvent::Empty => continue,
+                }
+            }
+
+            if self.done {
+                return Ok(None);
+            }
+
+            match self.response.chunk().await? {
+                Some(chunk) => {
+                    self.buffer.push_str(&String::from_utf8_lossy(&chunk));
+                }
+                None => {
+                    self.done = true;
+                    let raw_event = self.buffer.trim().to_string();
+                    self.buffer.clear();
+
+                    if raw_event.is_empty() {
+                        return Ok(None);
+                    }
+
+                    match parse_sse_event(&raw_event)? {
+                        ParsedSseEvent::Event(event) => return Ok(Some(event)),
+                        ParsedSseEvent::Done | ParsedSseEvent::Empty => return Ok(None),
+                    }
+                }
+            }
+        }
+    }
+
+    pub async fn next_text_delta(&mut self) -> Result<Option<String>, OpenAIError> {
+        while let Some(event) = self.next_event().await? {
+            if let Some(delta) = event.text_delta() {
+                return Ok(Some(delta.to_string()));
+            }
+        }
+
+        Ok(None)
+    }
+
+    fn next_buffered_event(&mut self) -> Option<String> {
+        let (index, marker_len) = find_sse_boundary(&self.buffer)?;
+        let raw_event = self.buffer[..index].to_string();
+        self.buffer.drain(..index + marker_len);
+        Some(raw_event)
+    }
+}
+
+enum ParsedSseEvent {
+    Event(ResponseStreamEvent),
+    Done,
+    Empty,
+}
+
+fn find_sse_boundary(buffer: &str) -> Option<(usize, usize)> {
+    buffer
+        .find("\r\n\r\n")
+        .map(|index| (index, 4))
+        .or_else(|| buffer.find("\n\n").map(|index| (index, 2)))
+}
+
+fn parse_sse_event(raw_event: &str) -> Result<ParsedSseEvent, OpenAIError> {
+    let mut event = None;
+    let mut id = None;
+    let mut data = Vec::new();
+
+    for line in raw_event.lines() {
+        let line = line.trim_end_matches('\r');
+
+        if line.is_empty() || line.starts_with(':') {
+            continue;
+        }
+
+        let (field, value) = line.split_once(':').unwrap_or((line, ""));
+        let value = value.strip_prefix(' ').unwrap_or(value);
+
+        match field {
+            "event" => event = Some(value.to_string()),
+            "id" => id = Some(value.to_string()),
+            "data" => data.push(value),
+            _ => {}
+        }
+    }
+
+    if data.is_empty() {
+        return Ok(ParsedSseEvent::Empty);
+    }
+
+    let data = data.join("\n");
+
+    if data == "[DONE]" {
+        return Ok(ParsedSseEvent::Done);
+    }
+
+    let mut stream_event: ResponseStreamEvent = serde_json::from_str(&data)?;
+    stream_event.id = stream_event.id.or(id);
+    stream_event.event = stream_event.event.or(event);
+
+    Ok(ParsedSseEvent::Event(stream_event))
+}
 
 #[derive(Debug)]
 pub enum OpenAIError {
@@ -187,5 +343,39 @@ impl From<reqwest::Error> for OpenAIError {
 impl From<serde_json::Error> for OpenAIError {
     fn from(error: serde_json::Error) -> Self {
         Self::Json(error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_sse_response_event() {
+        let parsed = parse_sse_event(
+            "event: response.output_text.delta\n\
+             data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hi\",\"sequence_number\":1}",
+        )
+        .expect("event should parse");
+
+        let ParsedSseEvent::Event(event) = parsed else {
+            panic!("expected parsed event");
+        };
+
+        assert_eq!(event.event.as_deref(), Some("response.output_text.delta"));
+        assert_eq!(event.text_delta(), Some("Hi"));
+    }
+
+    #[test]
+    fn parses_done_sse_event() {
+        let parsed = parse_sse_event("data: [DONE]").expect("done should parse");
+
+        assert!(matches!(parsed, ParsedSseEvent::Done));
+    }
+
+    #[test]
+    fn finds_crlf_and_lf_boundaries() {
+        assert_eq!(find_sse_boundary("data: {}\r\n\r\n"), Some((8, 4)));
+        assert_eq!(find_sse_boundary("data: {}\n\n"), Some((8, 2)));
     }
 }

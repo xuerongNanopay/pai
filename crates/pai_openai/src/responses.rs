@@ -54,6 +54,11 @@ impl ResponseCreateRequest {
             ..Self::default()
         }
     }
+
+    pub fn with_stream(mut self, stream: bool) -> Self {
+        self.stream = Some(stream);
+        self
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -491,6 +496,35 @@ pub struct InputTokenCount {
     pub input_tokens: u64,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ResponseStreamEvent {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event: Option<String>,
+    #[serde(rename = "type")]
+    pub event_type: String,
+    #[serde(flatten)]
+    pub data: HashMap<String, Value>,
+}
+
+impl ResponseStreamEvent {
+    pub fn text_delta(&self) -> Option<&str> {
+        if self.event_type == "response.output_text.delta" {
+            self.data.get("delta").and_then(Value::as_str)
+        } else {
+            None
+        }
+    }
+
+    pub fn response(&self) -> Option<Response> {
+        self.data
+            .get("response")
+            .cloned()
+            .and_then(|value| serde_json::from_value(value).ok())
+    }
+}
+
 pub type InputTokenCountRequest = ResponseCreateRequest;
 pub type CompactResponseRequest = ResponseCreateRequest;
 
@@ -542,5 +576,19 @@ mod tests {
         let response: Response = serde_json::from_value(json).expect("response should parse");
 
         assert_eq!(response.output_text(), "Hello world");
+    }
+
+    #[test]
+    fn extracts_text_delta_from_stream_event() {
+        let event: ResponseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.output_text.delta",
+            "delta": "Hello",
+            "output_index": 0,
+            "content_index": 0,
+            "sequence_number": 1
+        }))
+        .expect("stream event should parse");
+
+        assert_eq!(event.text_delta(), Some("Hello"));
     }
 }
