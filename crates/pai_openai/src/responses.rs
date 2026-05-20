@@ -100,6 +100,22 @@ impl InputMessage {
             status: None,
         }
     }
+
+    pub fn assistant(text: impl Into<String>) -> Self {
+        Self {
+            role: MessageRole::Assistant,
+            content: InputMessageContent::Text(text.into()),
+            status: None,
+        }
+    }
+
+    pub fn developer(text: impl Into<String>) -> Self {
+        Self {
+            role: MessageRole::Developer,
+            content: InputMessageContent::Text(text.into()),
+            status: None,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -559,6 +575,34 @@ mod tests {
         assert_eq!(json["model"], "gpt-5");
         assert_eq!(json["input"][0]["role"], "user");
         assert_eq!(json["input"][0]["content"], "Tell me a joke.");
+    }
+
+    #[test]
+    fn serializes_input_message_shortcuts() {
+        let messages = [
+            InputMessage::developer("Answer briefly."),
+            InputMessage::user("Tell me a joke."),
+            InputMessage::assistant("Sure."),
+        ];
+        let json = serde_json::to_value(messages).expect("messages should serialize");
+
+        assert_eq!(
+            json,
+            serde_json::json!([
+                {
+                    "role": "developer",
+                    "content": "Answer briefly."
+                },
+                {
+                    "role": "user",
+                    "content": "Tell me a joke."
+                },
+                {
+                    "role": "assistant",
+                    "content": "Sure."
+                }
+            ])
+        );
     }
 
     #[test]
