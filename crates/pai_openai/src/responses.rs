@@ -47,10 +47,21 @@ pub struct ResponseCreateRequest {
 }
 
 impl ResponseCreateRequest {
-    pub fn text(model: impl Into<String>, input: impl Into<String>) -> Self {
+    pub fn with_text(model: impl Into<String>, input: impl Into<String>) -> Self {
         Self {
             model: Some(model.into()),
             input: Some(ResponseInput::Text(input.into())),
+            ..Self::default()
+        }
+    }
+
+    pub fn with_items<I>(model: impl Into<String>, items: I) -> Self
+    where
+        I: IntoIterator<Item = InputItem>,
+    {
+        Self {
+            model: Some(model.into()),
+            input: Some(ResponseInput::Items(items.into_iter().collect())),
             ..Self::default()
         }
     }
@@ -534,12 +545,25 @@ mod tests {
 
     #[test]
     fn serializes_simple_text_request() {
-        let request = ResponseCreateRequest::text("gpt-5", "Tell me a joke.");
+        let request = ResponseCreateRequest::with_text("gpt-5", "Tell me a joke.");
         let json = serde_json::to_value(request).expect("request should serialize");
 
         assert_eq!(json["model"], "gpt-5");
         assert_eq!(json["input"], "Tell me a joke.");
         assert!(json.get("tools").is_none());
+    }
+
+    #[test]
+    fn serializes_items_request() {
+        let request = ResponseCreateRequest::with_items(
+            "gpt-5",
+            [InputItem::Message(InputMessage::user("Tell me a joke."))],
+        );
+        let json = serde_json::to_value(request).expect("request should serialize");
+
+        assert_eq!(json["model"], "gpt-5");
+        assert_eq!(json["input"][0]["role"], "user");
+        assert_eq!(json["input"][0]["content"], "Tell me a joke.");
     }
 
     #[test]
