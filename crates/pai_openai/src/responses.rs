@@ -65,6 +65,10 @@ impl ResponseCreateRequest {
             ..Self::default()
         }
     }
+
+    pub fn with_json(json: &str) -> serde_json::Result<Self> {
+        serde_json::from_str(json)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -575,6 +579,66 @@ mod tests {
         assert_eq!(json["model"], "gpt-5");
         assert_eq!(json["input"][0]["role"], "user");
         assert_eq!(json["input"][0]["content"], "Tell me a joke.");
+    }
+
+    #[test]
+    fn creates_text_request_from_json() {
+        let request = ResponseCreateRequest::with_json(
+            r#"{
+                "model": "gpt-5",
+                "input": "Tell me a joke."
+            }"#,
+        )
+        .expect("request should deserialize");
+
+        let json = serde_json::to_value(request).expect("request should serialize");
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "model": "gpt-5",
+                "input": "Tell me a joke."
+            })
+        );
+    }
+
+    #[test]
+    fn creates_items_request_from_json() {
+        let request = ResponseCreateRequest::with_json(
+            r#"{
+                "model": "gpt-5",
+                "input": [
+                    {
+                        "role": "developer",
+                        "content": "Answer briefly."
+                    },
+                    {
+                        "role": "user",
+                        "content": "Tell me a joke."
+                    }
+                ]
+            }"#,
+        )
+        .expect("request should deserialize");
+
+        let json = serde_json::to_value(request).expect("request should serialize");
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "model": "gpt-5",
+                "input": [
+                    {
+                        "role": "developer",
+                        "content": "Answer briefly."
+                    },
+                    {
+                        "role": "user",
+                        "content": "Tell me a joke."
+                    }
+                ]
+            })
+        );
     }
 
     #[test]
