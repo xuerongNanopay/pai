@@ -1,7 +1,9 @@
 use std::{env, error::Error, fmt};
 
+pub mod files;
 pub mod responses;
 
+pub use files::*;
 pub use responses::*;
 
 pub const GPT_5_5_PRO: &str = "gpt-5.5-pro";
@@ -107,6 +109,72 @@ impl OpenAIClient {
         self.post_json("responses/input_tokens", request).await
     }
 
+    pub async fn list_files(&self, query: &FileListQuery) -> Result<FileList, OpenAIError> {
+        let response = self
+            .http
+            .get(self.url("files"))
+            .bearer_auth(&self.api_key)
+            .query(query)
+            .send()
+            .await?;
+
+        Self::parse_response(response).await
+    }
+
+    pub async fn upload_file(&self, request: FileUploadRequest) -> Result<FileObject, OpenAIError> {
+        let file_part = reqwest::multipart::Part::bytes(request.bytes)
+            .file_name(request.filename)
+            .mime_str("application/octet-stream")?;
+        let mut form = reqwest::multipart::Form::new()
+            .part("file", file_part)
+            .text("purpose", request.purpose.as_str().to_string());
+
+        if let Some(expires_after) = request.expires_after {
+            form = form.text(
+                "expires_after",
+                serde_json::to_string(&expires_after).map_err(OpenAIError::Json)?,
+            );
+        }
+
+        let response = self
+            .http
+            .post(self.url("files"))
+            .bearer_auth(&self.api_key)
+            .multipart(form)
+            .send()
+            .await?;
+
+        Self::parse_response(response).await
+    }
+
+    pub async fn upload_file_from_path(
+        &self,
+        path: impl AsRef<std::path::Path>,
+        purpose: FilePurpose,
+    ) -> Result<FileObject, OpenAIError> {
+        let request = FileUploadRequest::with_path(path, purpose).await?;
+        self.upload_file(request).await
+    }
+
+    pub async fn retrieve_file(&self, file_id: &str) -> Result<FileObject, OpenAIError> {
+        self.get_json(&format!("files/{file_id}")).await
+    }
+
+    pub async fn delete_file(&self, file_id: &str) -> Result<FileDeleted, OpenAIError> {
+        self.delete_json(&format!("files/{file_id}")).await
+    }
+
+    pub async fn retrieve_file_content(&self, file_id: &str) -> Result<Vec<u8>, OpenAIError> {
+        let response = self
+            .http
+            .get(self.url(&format!("files/{file_id}/content")))
+            .bearer_auth(&self.api_key)
+            .send()
+            .await?;
+
+        Self::parse_bytes_response(response).await
+    }
+
     async fn get_json<T>(&self, path: &str) -> Result<T, OpenAIError>
     where
         T: serde::de::DeserializeOwned,
@@ -174,6 +242,18 @@ impl OpenAIClient {
             Ok(ResponseStream::new(response))
         } else {
             let body = response.text().await?;
+            Err(OpenAIError::Api { status, body })
+        }
+    }
+
+    async fn parse_bytes_response(response: reqwest::Response) -> Result<Vec<u8>, OpenAIError> {
+        let status = response.status();
+        let bytes = response.bytes().await?;
+
+        if status.is_success() {
+            Ok(bytes.to_vec())
+        } else {
+            let body = String::from_utf8_lossy(&bytes).to_string();
             Err(OpenAIError::Api { status, body })
         }
     }
@@ -315,6 +395,7 @@ pub enum OpenAIError {
     MissingApiKey,
     Request(reqwest::Error),
     Json(serde_json::Error),
+    Io(std::io::Error),
     Api {
         status: reqwest::StatusCode,
         body: String,
@@ -327,6 +408,7 @@ impl fmt::Display for OpenAIError {
             Self::MissingApiKey => write!(f, "OPENAI_API_KEY is not set"),
             Self::Request(error) => write!(f, "request failed: {error}"),
             Self::Json(error) => write!(f, "failed to parse response JSON: {error}"),
+            Self::Io(error) => write!(f, "I/O failed: {error}"),
             Self::Api { status, body } => write!(f, "OpenAI API returned {status}: {body}"),
         }
     }
@@ -343,6 +425,12 @@ impl From<reqwest::Error> for OpenAIError {
 impl From<serde_json::Error> for OpenAIError {
     fn from(error: serde_json::Error) -> Self {
         Self::Json(error)
+    }
+}
+
+impl From<std::io::Error> for OpenAIError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
     }
 }
 
