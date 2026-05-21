@@ -12,7 +12,6 @@ members = [
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
-dead_code = "allow"
 
 [workspace.lints.clippy]
 unwrap_used = "warn"
