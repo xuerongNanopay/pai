@@ -215,6 +215,7 @@ pub struct ReasoningConfig {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum ReasoningEffort {
+    None,
     Minimal,
     Low,
     Medium,
@@ -810,6 +811,27 @@ mod tests {
         let response: Response = serde_json::from_value(json).expect("response should parse");
 
         assert_eq!(response.output_text(), "Hello world");
+    }
+
+    #[test]
+    fn deserializes_response_with_no_reasoning_effort() {
+        let json = serde_json::json!({
+            "id": "resp_123",
+            "object": "response",
+            "created_at": 1741476542,
+            "status": "completed",
+            "model": "gpt-5",
+            "reasoning": {
+                "effort": "none"
+            },
+            "output": [],
+            "metadata": {}
+        });
+
+        let response: Response = serde_json::from_value(json).expect("response should parse");
+
+        let reasoning = response.reasoning.expect("reasoning should be present");
+        assert!(matches!(reasoning.effort, Some(ReasoningEffort::None)));
     }
 
     #[test]
